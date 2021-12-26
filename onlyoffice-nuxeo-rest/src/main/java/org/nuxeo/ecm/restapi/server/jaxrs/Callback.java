@@ -54,7 +54,7 @@ public class Callback extends DefaultObject {
     @POST
     @Path("callback/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    public Object postCallback(@PathParam("id") String id, @QueryParam("index") String indexAtt, InputStream input) {
+    public Object postCallback(@PathParam("id") String id, @QueryParam("digest") String digest, InputStream input) {
         Status code = Status.OK;
         Exception error = null;
 
@@ -91,8 +91,8 @@ public class Callback extends DefaultObject {
 
             CoreSession session = getContext().getCoreSession();
             DocumentModel model = session.getDocument(new IdRef(id));
-            if (indexAtt != null) {
-                json.put("indexAtt", indexAtt);
+            if (digest != null) {
+                json.put("digest", digest);
             }
             processCallback(session, model, json);
 
@@ -139,7 +139,7 @@ public class Callback extends DefaultObject {
         case 2:
             logger.info("Document Updated, changing content");
             model.removeLock();
-            updateDocument(session, model, json.getString("key"), json.getString("url"), json.optString("indexAtt"));
+            updateDocument(session, model, json.getString("key"), json.getString("url"), json.optString("digest"));
             break;
         case 3:
             logger.error("ONLYOFFICE has reported that saving the document has failed");
@@ -152,10 +152,10 @@ public class Callback extends DefaultObject {
         }
     }
 
-    private void updateDocument(CoreSession session, DocumentModel model, String changeToken, String url, String indexAtt) throws Exception {
+    private void updateDocument(CoreSession session, DocumentModel model, String changeToken, String url, String digest) throws Exception {
         Blob original;
         Blob saved;
-        if (indexAtt == null || indexAtt.isEmpty()) {
+        if (digest.isEmpty()) {
             original = getBlob(model, "file:content");
             saved = Blobs.createBlob(new URL(url).openStream(), original.getMimeType(), original.getEncoding());
             saved.setFilename(original.getFilename());
@@ -163,12 +163,16 @@ public class Callback extends DefaultObject {
             DocumentHelper.addBlob(model.getProperty("file:content"), saved);
         } else {
             List<Map<String, Serializable>> files = (List<Map<String, Serializable>>) model.getPropertyValue("files:files");
-            Map<String, Serializable> map = files.get(Integer.parseInt(indexAtt));
-            original = (Blob) map.get("file");
-            saved = Blobs.createBlob(new URL(url).openStream(), original.getMimeType(), original.getEncoding());
-            saved.setFilename(original.getFilename());
-
-            files.set(Integer.parseInt(indexAtt),DocumentHelper.createBlobHolderMap(saved));
+            for (int i=0;i<files.size();i++){
+                Map<String, Serializable> map = files.get(i);
+                original = (Blob) map.get("file");
+                if (digest.equals(original.getDigest())){
+                    saved = Blobs.createBlob(new URL(url).openStream(), original.getMimeType(), original.getEncoding());
+                    saved.setFilename(original.getFilename());
+                    files.set(i,DocumentHelper.createBlobHolderMap(saved));
+                    break;
+                }
+            }
             model.setPropertyValue("files:files", (Serializable) files);
         }
 

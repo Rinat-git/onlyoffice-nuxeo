@@ -9,6 +9,7 @@ import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
+import com.sun.org.apache.bcel.internal.generic.ATHROW;
 import org.json.JSONObject;
 import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.CoreSession;
@@ -58,14 +59,14 @@ public class Editor extends ModuleRoot {
     @GET
     @Path("{id}")
     @Produces(MediaType.TEXT_HTML)
-    public Object getEdit(@PathParam("id") String id, @QueryParam("mode") String mode, @QueryParam("index") String indexAtt) {
+    public Object getEdit(@PathParam("id") String id, @QueryParam("mode") String mode, @QueryParam("index") String indexAtt, @QueryParam("digest") String digest) {
         WebContext ctx = getContext();
         CoreSession session = ctx.getCoreSession();
         DocumentModel model = session.getDocument(new IdRef(id));
 
         try {
             return getView("index")
-                    .arg("config", getConfig(ctx, model, mode, indexAtt))
+                    .arg("config", getConfig(ctx, model, mode, indexAtt, digest))
                     .arg("docUrl", config.getDocServUrl())
                     .arg("docTitle", model.getTitle());
         } catch (Exception e) {
@@ -74,7 +75,7 @@ public class Editor extends ModuleRoot {
         }
     }
 
-    private JSONObject getConfig(WebContext ctx, DocumentModel model, String mode, String indexAtt) throws Exception {
+    private JSONObject getConfig(WebContext ctx, DocumentModel model, String mode, String indexAtt, String digest) throws Exception {
         String user = ctx.getPrincipal().getName();
         String token = authService.acquireToken(user, "ONLYOFFICE", "editor", "auth", "rw");
         String baseUrl = ctx.getBaseURL();
@@ -101,15 +102,22 @@ public class Editor extends ModuleRoot {
             contentUrl = String.format("%s/nuxeo/nxfile/%s/%s/file:content/%s?token=%s", baseUrl, repoName, docId, docFilename, token);
             callbackUrl = String.format("%s/nuxeo/api/v1/onlyoffice/callback/%s?token=%s", baseUrl, docId, token);
         } else {
+            if (digest == null) {
+                throw new Exception();
+            }
             List<Map<String, Serializable>> files = (List<Map<String, Serializable>>) model.getPropertyValue("files:files");
             Map<String, Serializable> map = files.get(Integer.parseInt(indexAtt));
             Blob blob = (Blob) map.get("file");
+
+            if (!digest.equals(blob.getDigest())){
+                throw new Exception();
+            }
 
             docFilename = blob.getFilename();
             docTitle = docFilename;
             documentObject.put("key", utils.getDocumentKey(model, indexAtt));
             contentUrl = String.format("%s/nuxeo/nxfile/%s/%s/files:files/%s/file/%s?token=%s", baseUrl, repoName, docId, indexAtt, docFilename, token);
-            callbackUrl = String.format("%s/nuxeo/api/v1/onlyoffice/callback/%s?index=%s&token=%s", baseUrl, docId, indexAtt, token);
+            callbackUrl = String.format("%s/nuxeo/api/v1/onlyoffice/callback/%s?digest=%s&token=%s", baseUrl, docId, digest, token);
         }
 
         docExt = utils.getFileExtension(docFilename);
