@@ -1,17 +1,12 @@
 package org.nuxeo.ecm.restapi.server.jaxrs;
 
 import java.io.InputStream;
+import java.io.Serializable;
 import java.net.URL;
 import java.nio.charset.Charset;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
+import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.Status;
@@ -26,6 +21,7 @@ import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.IdRef;
 import org.nuxeo.ecm.core.api.VersioningOption;
 import org.nuxeo.ecm.core.api.blobholder.BlobHolder;
+import org.nuxeo.ecm.core.api.model.Property;
 import org.nuxeo.ecm.core.api.versioning.VersioningService;
 import org.nuxeo.ecm.core.schema.FacetNames;
 import org.nuxeo.ecm.webengine.model.WebObject;
@@ -58,13 +54,12 @@ public class Callback extends DefaultObject {
     @POST
     @Path("callback/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    public Object postCallback(@PathParam("id") String id, InputStream input) {
+    public Object postCallback(@PathParam("id") String id, @QueryParam("index") String indexAtt, InputStream input) {
         Status code = Status.OK;
         Exception error = null;
 
         try {
             JSONObject json = new JSONObject(IOUtils.toString(input, Charset.defaultCharset()));
-
             if (jwtManager.isEnabled()) {
                 String token = json.optString("token");
                 Boolean inBody = true;
@@ -96,7 +91,9 @@ public class Callback extends DefaultObject {
 
             CoreSession session = getContext().getCoreSession();
             DocumentModel model = session.getDocument(new IdRef(id));
-
+            if (indexAtt != null) {
+                json.put("indexAtt", indexAtt);
+            }
             processCallback(session, model, json);
 
         } catch (SecurityException ex) {
@@ -142,7 +139,7 @@ public class Callback extends DefaultObject {
         case 2:
             logger.info("Document Updated, changing content");
             model.removeLock();
-            updateDocument(session, model, json.getString("key"), json.getString("url"));
+            updateDocument(session, model, json.getString("key"), json.getString("url"), json.optString("indexAtt"));
             break;
         case 3:
             logger.error("ONLYOFFICE has reported that saving the document has failed");
@@ -155,12 +152,26 @@ public class Callback extends DefaultObject {
         }
     }
 
-    private void updateDocument(CoreSession session, DocumentModel model, String changeToken, String url) throws Exception {
-        Blob original = getBlob(model, "file:content");
-        Blob saved = Blobs.createBlob(new URL(url).openStream(), original.getMimeType(), original.getEncoding());
-        saved.setFilename(original.getFilename());
+    private void updateDocument(CoreSession session, DocumentModel model, String changeToken, String url, String indexAtt) throws Exception {
+        Blob original;
+        Blob saved;
+        if (indexAtt == null || indexAtt.isEmpty()) {
+            original = getBlob(model, "file:content");
+            saved = Blobs.createBlob(new URL(url).openStream(), original.getMimeType(), original.getEncoding());
+            saved.setFilename(original.getFilename());
 
-        DocumentHelper.addBlob(model.getProperty("file:content"), saved);
+            DocumentHelper.addBlob(model.getProperty("file:content"), saved);
+        } else {
+            List<Map<String, Serializable>> files = (List<Map<String, Serializable>>) model.getPropertyValue("files:files");
+            Map<String, Serializable> map = files.get(Integer.parseInt(indexAtt));
+            original = (Blob) map.get("file");
+            saved = Blobs.createBlob(new URL(url).openStream(), original.getMimeType(), original.getEncoding());
+            saved.setFilename(original.getFilename());
+
+            files.set(Integer.parseInt(indexAtt),DocumentHelper.createBlobHolderMap(saved));
+            model.setPropertyValue("files:files", (Serializable) files);
+        }
+
 
         if (model.hasFacet(FacetNames.VERSIONABLE)) {
             VersioningOption vo = VersioningOption.MINOR;

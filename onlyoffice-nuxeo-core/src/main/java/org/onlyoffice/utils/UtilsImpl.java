@@ -8,9 +8,9 @@ import org.nuxeo.runtime.model.DefaultComponent;
 public class UtilsImpl extends DefaultComponent implements Utils {
 
     @Override
-    public String getDocumentKey(DocumentModel model) {
+    public String getDocumentKey(DocumentModel model, String index) {
         try {
-            String key = model.getId() + "__" + model.getChangeToken();
+            String key = model.getId() + (index==null?"":"a"+index)+ "__" + model.getChangeToken();
             return Base64.getEncoder().encodeToString(key.getBytes("UTF-8"));
         } catch (Exception e) {
             return null;

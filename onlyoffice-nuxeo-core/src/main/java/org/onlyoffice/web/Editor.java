@@ -10,10 +10,12 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
 import org.json.JSONObject;
+import org.nuxeo.ecm.core.api.Blob;
 import org.nuxeo.ecm.core.api.CoreSession;
 import org.nuxeo.ecm.core.api.DocumentModel;
 import org.nuxeo.ecm.core.api.IdRef;
 import org.nuxeo.ecm.core.api.blobholder.BlobHolder;
+import org.nuxeo.ecm.core.api.model.impl.ListProperty;
 import org.nuxeo.ecm.tokenauth.service.TokenAuthenticationService;
 import org.nuxeo.ecm.webengine.model.WebContext;
 import org.nuxeo.ecm.webengine.model.WebObject;
@@ -24,6 +26,10 @@ import org.onlyoffice.utils.JwtManager;
 import org.onlyoffice.utils.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.Serializable;
+import java.util.List;
+import java.util.Map;
 
 @Path("/onlyedit")
 @WebObject(type = "onlyedit")
@@ -52,23 +58,23 @@ public class Editor extends ModuleRoot {
     @GET
     @Path("{id}")
     @Produces(MediaType.TEXT_HTML)
-    public Object getEdit(@PathParam("id") String id, @QueryParam("mode") String mode) {
+    public Object getEdit(@PathParam("id") String id, @QueryParam("mode") String mode, @QueryParam("index") String indexAtt) {
         WebContext ctx = getContext();
         CoreSession session = ctx.getCoreSession();
         DocumentModel model = session.getDocument(new IdRef(id));
 
         try {
             return getView("index")
-                .arg("config", getConfig(ctx, model, mode))
-                .arg("docUrl", config.getDocServUrl())
-                .arg("docTitle", model.getTitle());
+                    .arg("config", getConfig(ctx, model, mode, indexAtt))
+                    .arg("docUrl", config.getDocServUrl())
+                    .arg("docTitle", model.getTitle());
         } catch (Exception e) {
             logger.error("Error while opening editor for " + id, e);
             return Response.serverError().build();
         }
     }
 
-    private JSONObject getConfig(WebContext ctx, DocumentModel model, String mode) throws Exception {
+    private JSONObject getConfig(WebContext ctx, DocumentModel model, String mode, String indexAtt) throws Exception {
         String user = ctx.getPrincipal().getName();
         String token = authService.acquireToken(user, "ONLYOFFICE", "editor", "auth", "rw");
         String baseUrl = ctx.getBaseURL();
@@ -81,14 +87,32 @@ public class Editor extends ModuleRoot {
         JSONObject userObject = new JSONObject();
         JSONObject permObject = new JSONObject();
 
-        String docTitle = model.getTitle();
-        String docFilename = model.getAdapter(BlobHolder.class).getBlob().getFilename();
-        String docExt = utils.getFileExtension(docFilename);
         String docId = model.getId();
+        String docTitle = "";
+        String docFilename = "";
+        String docExt = "";
+        String contentUrl = "";
+        String callbackUrl = "";
 
-        String contentUrl = String.format("%1s/nuxeo/nxfile/%2s/%3s/file:content/%4s?token=%5s", baseUrl, repoName, docId, docFilename, token);
-        String callbackUrl = String.format("%1s/nuxeo/api/v1/onlyoffice/callback/%2s?token=%3s", baseUrl, docId, token);
+        if (indexAtt == null) {
+            docTitle = model.getTitle();
+            docFilename = model.getAdapter(BlobHolder.class).getBlob().getFilename();
+            documentObject.put("key", utils.getDocumentKey(model, null));
+            contentUrl = String.format("%s/nuxeo/nxfile/%s/%s/file:content/%s?token=%s", baseUrl, repoName, docId, docFilename, token);
+            callbackUrl = String.format("%s/nuxeo/api/v1/onlyoffice/callback/%s?token=%s", baseUrl, docId, token);
+        } else {
+            List<Map<String, Serializable>> files = (List<Map<String, Serializable>>) model.getPropertyValue("files:files");
+            Map<String, Serializable> map = files.get(Integer.parseInt(indexAtt));
+            Blob blob = (Blob) map.get("file");
 
+            docFilename = blob.getFilename();
+            docTitle = docFilename;
+            documentObject.put("key", utils.getDocumentKey(model, indexAtt));
+            contentUrl = String.format("%s/nuxeo/nxfile/%s/%s/files:files/%s/file/%s?token=%s", baseUrl, repoName, docId, indexAtt, docFilename, token);
+            callbackUrl = String.format("%s/nuxeo/api/v1/onlyoffice/callback/%s?index=%s&token=%s", baseUrl, docId, indexAtt, token);
+        }
+
+        docExt = utils.getFileExtension(docFilename);
         Boolean toEdit = mode != null && mode.equals("edit");
 
         responseJson.put("type", "desktop");
@@ -100,7 +124,7 @@ public class Editor extends ModuleRoot {
         documentObject.put("title", docTitle);
         documentObject.put("url", contentUrl);
         documentObject.put("fileType", docExt);
-        documentObject.put("key", utils.getDocumentKey(model));
+        //documentObject.put("key", utils.getDocumentKey(model, indexAtt));
         documentObject.put("permissions", permObject);
         permObject.put("edit", toEdit);
 
