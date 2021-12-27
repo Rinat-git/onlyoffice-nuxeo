@@ -69,9 +69,12 @@ public class Editor extends ModuleRoot {
                     .arg("config", getConfig(ctx, model, mode, indexAtt, digest))
                     .arg("docUrl", config.getDocServUrl())
                     .arg("docTitle", model.getTitle());
+        } catch (IllegalArgumentException e) {
+            logger.error("Error while opening editor for " + id +": " + e.getMessage());
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
         } catch (Exception e) {
             logger.error("Error while opening editor for " + id, e);
-            return Response.serverError().build();
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
         }
     }
 
@@ -98,24 +101,22 @@ public class Editor extends ModuleRoot {
         if (indexAtt == null) {
             docTitle = model.getTitle();
             docFilename = model.getAdapter(BlobHolder.class).getBlob().getFilename();
-            documentObject.put("key", utils.getDocumentKey(model, null));
             contentUrl = String.format("%s/nuxeo/nxfile/%s/%s/file:content/%s?token=%s", baseUrl, repoName, docId, docFilename, token);
             callbackUrl = String.format("%s/nuxeo/api/v1/onlyoffice/callback/%s?token=%s", baseUrl, docId, token);
         } else {
             if (digest == null) {
-                throw new Exception();
+                throw new IllegalArgumentException("Digest is null");
             }
             List<Map<String, Serializable>> files = (List<Map<String, Serializable>>) model.getPropertyValue("files:files");
             Map<String, Serializable> map = files.get(Integer.parseInt(indexAtt));
             Blob blob = (Blob) map.get("file");
 
             if (!digest.equals(blob.getDigest())){
-                throw new Exception();
+                throw new IllegalArgumentException("Digest is incorrect");
             }
 
             docFilename = blob.getFilename();
             docTitle = docFilename;
-            documentObject.put("key", utils.getDocumentKey(model, indexAtt));
             contentUrl = String.format("%s/nuxeo/nxfile/%s/%s/files:files/%s/file/%s?token=%s", baseUrl, repoName, docId, indexAtt, docFilename, token);
             callbackUrl = String.format("%s/nuxeo/api/v1/onlyoffice/callback/%s?digest=%s&token=%s", baseUrl, docId, digest, token);
         }
@@ -132,7 +133,7 @@ public class Editor extends ModuleRoot {
         documentObject.put("title", docTitle);
         documentObject.put("url", contentUrl);
         documentObject.put("fileType", docExt);
-        //documentObject.put("key", utils.getDocumentKey(model, indexAtt));
+        documentObject.put("key", utils.getDocumentKey(model, indexAtt));
         documentObject.put("permissions", permObject);
         permObject.put("edit", toEdit);
 
