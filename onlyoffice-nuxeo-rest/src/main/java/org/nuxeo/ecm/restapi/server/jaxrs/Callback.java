@@ -163,6 +163,7 @@ public class Callback extends DefaultObject {
             DocumentHelper.addBlob(model.getProperty("file:content"), saved);
         } else {
             List<Map<String, Serializable>> files = (List<Map<String, Serializable>>) model.getPropertyValue("files:files");
+            boolean check = false;
             for (int i=0;i<files.size();i++){
                 Map<String, Serializable> map = files.get(i);
                 original = (Blob) map.get("file");
@@ -170,10 +171,14 @@ public class Callback extends DefaultObject {
                     saved = Blobs.createBlob(new URL(url).openStream(), original.getMimeType(), original.getEncoding());
                     saved.setFilename(original.getFilename());
                     files.set(i,DocumentHelper.createBlobHolderMap(saved));
+                    model.setPropertyValue("files:files", (Serializable) files);
+                    check = true;
                     break;
                 }
             }
-            model.setPropertyValue("files:files", (Serializable) files);
+            if (!check) {
+                return;
+            }
         }
 
 
